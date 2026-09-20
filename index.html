@@ -51,6 +51,8 @@ html, body {
 }
 
 
+/* Chaque œil */
+
 .eye {
     position: relative;
 
@@ -63,6 +65,8 @@ html, body {
 }
 
 
+/* Vidéo */
+
 .eye video {
     position: absolute;
 
@@ -74,12 +78,11 @@ html, body {
 
     object-fit: cover;
 
-    /* Caméra arrière = pas de miroir */
-    transform: none;
-
     background: #000;
 }
 
+
+/* Canvas des points */
 
 .eye canvas {
     position: absolute;
@@ -93,6 +96,22 @@ html, body {
     pointer-events: none;
 }
 
+
+/* Canvas 3D */
+
+.eye .hand3d {
+    z-index: 5;
+}
+
+
+/* Canvas MediaPipe */
+
+.eye .landmarks {
+    z-index: 10;
+}
+
+
+/* Ligne centrale */
 
 #middle {
     position: fixed;
@@ -142,6 +161,8 @@ html, body {
 }
 
 
+/* Bouton caméra */
+
 #start {
     position: fixed;
 
@@ -168,6 +189,8 @@ html, body {
 }
 
 
+/* Bouton plein écran */
+
 #fullscreen {
     position: fixed;
 
@@ -193,6 +216,8 @@ html, body {
 }
 
 
+/* En plein écran */
+
 :fullscreen #status {
     top: 8px;
 }
@@ -204,7 +229,13 @@ html, body {
 <body>
 
 
+<!-- =========================================
+     CARDBOARD
+========================================= -->
+
 <div id="vr">
+
+    <!-- ŒIL GAUCHE -->
 
     <div class="eye">
 
@@ -215,10 +246,20 @@ html, body {
             muted>
         </video>
 
-        <canvas id="canvasLeft"></canvas>
+        <canvas
+            id="canvasLeft"
+            class="landmarks">
+        </canvas>
+
+        <canvas
+            id="hand3dLeft"
+            class="hand3d">
+        </canvas>
 
     </div>
 
+
+    <!-- ŒIL DROIT -->
 
     <div class="eye">
 
@@ -229,7 +270,15 @@ html, body {
             muted>
         </video>
 
-        <canvas id="canvasRight"></canvas>
+        <canvas
+            id="canvasRight"
+            class="landmarks">
+        </canvas>
+
+        <canvas
+            id="hand3dRight"
+            class="hand3d">
+        </canvas>
 
     </div>
 
@@ -259,6 +308,20 @@ html, body {
 
 
 /* =========================================
+   THREE.JS
+========================================= */
+
+import * as THREE from
+    "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
+
+
+import {
+    GLTFLoader
+} from
+    "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/loaders/GLTFLoader.js";
+
+
+/* =========================================
    ÉLÉMENTS
 ========================================= */
 
@@ -273,6 +336,12 @@ const canvasLeft =
 
 const canvasRight =
     document.getElementById("canvasRight");
+
+const canvas3DLeft =
+    document.getElementById("hand3dLeft");
+
+const canvas3DRight =
+    document.getElementById("hand3dRight");
 
 const ctxLeft =
     canvasLeft.getContext("2d");
@@ -334,6 +403,1099 @@ const connections = [
 
 
 /* =========================================
+   SMOOTHING
+========================================= */
+
+const SMOOTHING = 0.35;
+
+
+/*
+    Dernières coordonnées MediaPipe.
+
+    Le tracking MediaPipe reste exactement
+    le même.
+
+    Le rendu 3D interpole entre les résultats
+    pour éviter les mouvements saccadés.
+*/
+
+let targetHands = [];
+
+let smoothHands = [];
+
+
+/* =========================================
+   THREE.JS
+========================================= */
+
+const scenes = [];
+
+const cameras3D = [];
+
+const renderers = [];
+
+const handModels = [];
+
+const loaders = [];
+
+
+/* =========================================
+   CRÉATION SCÈNE 3D
+========================================= */
+
+function create3DScene(
+    canvas
+) {
+
+    const scene =
+        new THREE.Scene();
+
+
+    /*
+        Caméra orthographique.
+
+        Elle permet de placer les points
+        directement avec les coordonnées
+        normalisées de MediaPipe.
+    */
+
+    const camera =
+        new THREE.OrthographicCamera(
+            -1,
+            1,
+            1,
+            -1,
+            0.01,
+            100
+        );
+
+
+    camera.position.z = 10;
+
+
+    const renderer =
+        new THREE.WebGLRenderer({
+
+            canvas: canvas,
+
+            alpha: true,
+
+            antialias: false,
+
+            powerPreference:
+                "high-performance"
+        });
+
+
+    renderer.setPixelRatio(1);
+
+    renderer.setClearColor(
+        0x000000,
+        0
+    );
+
+
+    scenes.push(scene);
+
+    cameras3D.push(camera);
+
+    renderers.push(renderer);
+
+
+    return {
+        scene,
+        camera,
+        renderer
+    };
+}
+
+
+/* =========================================
+   CRÉATION DES DEUX YEUX 3D
+========================================= */
+
+const left3D =
+    create3DScene(
+        canvas3DLeft
+    );
+
+
+const right3D =
+    create3DScene(
+        canvas3DRight
+    );
+
+
+/* =========================================
+   CHARGEMENT DU GLB
+========================================= */
+
+const MODEL_URL =
+    "https://raw.githubusercontent.com/Blackeige/MediaPipe-OpenCV/main/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb";
+
+
+const gltfLoader =
+    new GLTFLoader();
+
+
+let originalModel = null;
+
+
+/*
+    On garde une copie du modèle.
+
+    Le modèle est chargé une seule fois,
+    puis cloné pour les différents yeux/mains.
+*/
+
+async function loadHandModel() {
+
+    status.textContent =
+        "⏳ Chargement modèle 3D...";
+
+
+    const gltf =
+        await gltfLoader.loadAsync(
+            MODEL_URL
+        );
+
+
+    originalModel =
+        gltf.scene;
+
+
+    /*
+        Préparation du modèle.
+    */
+
+    originalModel.traverse(
+        object => {
+
+            if (
+                object.isMesh
+            ) {
+
+                object.frustumCulled =
+                    false;
+
+
+                if (
+                    object.material
+                ) {
+
+                    object.material =
+                        object.material.clone();
+
+                    object.material
+                        .transparent = true;
+
+                    object.material
+                        .opacity = 0.90;
+                }
+            }
+        }
+    );
+
+
+    status.textContent =
+        "✅ Modèle 3D chargé";
+}
+
+
+/* =========================================
+   CLONE DU MODÈLE
+========================================= */
+
+function cloneHandModel() {
+
+    if (!originalModel)
+        return null;
+
+
+    const model =
+        originalModel.clone(true);
+
+
+    model.visible =
+        false;
+
+
+    /*
+        Taille de base.
+
+        Elle sera ajustée automatiquement
+        en fonction des landmarks.
+    */
+
+    model.scale.set(
+        1,
+        1,
+        1
+    );
+
+
+    return model;
+}
+
+
+/* =========================================
+   OBJETS 3D PAR MAIN
+========================================= */
+
+function createHandInstance(
+    scene
+) {
+
+    const group =
+        new THREE.Group();
+
+
+    const model =
+        cloneHandModel();
+
+
+    if (model) {
+
+        group.add(
+            model
+        );
+    }
+
+
+    /*
+        Petits points invisibles servant
+        à calculer précisément les
+        positions des 21 landmarks.
+
+        Ils permettent aussi d'avoir
+        une représentation fonctionnelle
+        même si le rig du GLB possède
+        des noms différents.
+    */
+
+    const joints = [];
+
+
+    const jointGeometry =
+        new THREE.SphereGeometry(
+            0.035,
+            8,
+            8
+        );
+
+
+    const jointMaterial =
+        new THREE.MeshBasicMaterial({
+
+            color: 0xff1744,
+
+            transparent: true,
+
+            opacity: 0.0
+        });
+
+
+    for (
+        let i = 0;
+        i < 21;
+        i++
+    ) {
+
+        const joint =
+            new THREE.Mesh(
+                jointGeometry,
+                jointMaterial
+            );
+
+
+        joint.position.z =
+            0;
+
+
+        group.add(
+            joint
+        );
+
+
+        joints.push(
+            joint
+        );
+    }
+
+
+    /*
+        Squelette 3D léger.
+
+        Il reste invisible par défaut
+        lorsque le GLB fonctionne avec
+        son propre rig.
+    */
+
+    const bones = [];
+
+
+    const boneMaterial =
+        new THREE.MeshBasicMaterial({
+
+            color: 0x00ff88,
+
+            transparent: true,
+
+            opacity: 0.0
+        });
+
+
+    for (
+        const [a,b]
+        of connections
+    ) {
+
+        const geometry =
+            new THREE.CylinderGeometry(
+                0.018,
+                0.018,
+                1,
+                6
+            );
+
+
+        const mesh =
+            new THREE.Mesh(
+                geometry,
+                boneMaterial
+            );
+
+
+        group.add(
+            mesh
+        );
+
+
+        bones.push({
+            mesh,
+            a,
+            b
+        });
+    }
+
+
+    scene.add(
+        group
+    );
+
+
+    return {
+        group,
+        model,
+        joints,
+        bones,
+        target: [],
+        smooth: []
+    };
+}
+
+
+/* =========================================
+   MAINS 3D
+========================================= */
+
+const leftHands = [
+
+    createHandInstance(
+        left3D.scene
+    ),
+
+    createHandInstance(
+        left3D.scene
+    )
+
+];
+
+
+const rightHands = [
+
+    createHandInstance(
+        right3D.scene
+    ),
+
+    createHandInstance(
+        right3D.scene
+    )
+
+];
+
+
+/* =========================================
+   RÉCUPÉRATION DES OS DU GLB
+========================================= */
+
+function getBones(
+    model
+) {
+
+    const bones = [];
+
+
+    if (!model)
+        return bones;
+
+
+    model.traverse(
+        object => {
+
+            if (
+                object.isBone
+            ) {
+
+                bones.push(
+                    object
+                );
+            }
+        }
+    );
+
+
+    return bones;
+}
+
+
+/* =========================================
+   RECHERCHE D'UN OS
+========================================= */
+
+function findBone(
+    bones,
+    names
+) {
+
+    for (
+        const bone
+        of bones
+    ) {
+
+        const name =
+            bone.name.toLowerCase();
+
+
+        for (
+            const wanted
+            of names
+        ) {
+
+            if (
+                name.includes(
+                    wanted
+                )
+            ) {
+
+                return bone;
+            }
+        }
+    }
+
+
+    return null;
+}
+
+
+/* =========================================
+   MAPPING DES OS
+========================================= */
+
+function buildBoneMap(
+    model
+) {
+
+    const bones =
+        getBones(model);
+
+
+    /*
+        On cherche les noms les plus
+        courants des rigs de mains.
+
+        Cela permet de fonctionner avec
+        plusieurs conventions de noms.
+    */
+
+    return {
+
+        wrist:
+            findBone(
+                bones,
+                [
+                    "wrist",
+                    "hand",
+                    "forearm"
+                ]
+            ),
+
+        thumb1:
+            findBone(
+                bones,
+                [
+                    "thumb1",
+                    "thumb_1",
+                    "thumbproximal",
+                    "thumbprox"
+                ]
+            ),
+
+        thumb2:
+            findBone(
+                bones,
+                [
+                    "thumb2",
+                    "thumb_2",
+                    "thumbintermediate",
+                    "thumbmiddle"
+                ]
+            ),
+
+        thumb3:
+            findBone(
+                bones,
+                [
+                    "thumb3",
+                    "thumb_3",
+                    "thumbdistal",
+                    "thumbtip"
+                ]
+            ),
+
+        index1:
+            findBone(
+                bones,
+                [
+                    "index1",
+                    "index_1",
+                    "indexproximal"
+                ]
+            ),
+
+        index2:
+            findBone(
+                bones,
+                [
+                    "index2",
+                    "index_2",
+                    "indexintermediate"
+                ]
+            ),
+
+        index3:
+            findBone(
+                bones,
+                [
+                    "index3",
+                    "index_3",
+                    "indexdistal"
+                ]
+            ),
+
+        middle1:
+            findBone(
+                bones,
+                [
+                    "middle1",
+                    "middle_1",
+                    "middleproximal"
+                ]
+            ),
+
+        middle2:
+            findBone(
+                bones,
+                [
+                    "middle2",
+                    "middle_2",
+                    "middleintermediate"
+                ]
+            ),
+
+        middle3:
+            findBone(
+                bones,
+                [
+                    "middle3",
+                    "middle_3",
+                    "middledistal"
+                ]
+            ),
+
+        ring1:
+            findBone(
+                bones,
+                [
+                    "ring1",
+                    "ring_1",
+                    "ringproximal"
+                ]
+            ),
+
+        ring2:
+            findBone(
+                bones,
+                [
+                    "ring2",
+                    "ring_2",
+                    "ringintermediate"
+                ]
+            ),
+
+        ring3:
+            findBone(
+                bones,
+                [
+                    "ring3",
+                    "ring_3",
+                    "ringdistal"
+                ]
+            ),
+
+        pinky1:
+            findBone(
+                bones,
+                [
+                    "pinky1",
+                    "pinky_1",
+                    "little1",
+                    "littleproximal"
+                ]
+            ),
+
+        pinky2:
+            findBone(
+                bones,
+                [
+                    "pinky2",
+                    "pinky_2",
+                    "little2",
+                    "littleintermediate"
+                ]
+            ),
+
+        pinky3:
+            findBone(
+                bones,
+                [
+                    "pinky3",
+                    "pinky_3",
+                    "littledistal"
+                ]
+            )
+
+    };
+}
+
+
+/* =========================================
+   MAPPING DES LANDMARKS
+========================================= */
+
+function getFingerChains() {
+
+    return [
+
+        [0,1,2,3,4],
+
+        [0,5,6,7,8],
+
+        [0,9,10,11,12],
+
+        [0,13,14,15,16],
+
+        [0,17,18,19,20]
+
+    ];
+}
+
+
+/* =========================================
+   POSITION 3D
+========================================= */
+
+function landmarkTo3D(
+    point
+) {
+
+    /*
+        MediaPipe :
+
+        x = gauche → droite
+        y = haut → bas
+        z = profondeur
+
+        La caméra arrière n'est pas
+        retournée horizontalement.
+    */
+
+    const x =
+        (point.x - 0.5) * 2;
+
+
+    const y =
+        -(point.y - 0.5) * 2;
+
+
+    /*
+        Le z MediaPipe est relatif.
+        On le réduit fortement pour
+        éviter une profondeur excessive.
+    */
+
+    const z =
+        -point.z * 0.35;
+
+
+    return new THREE.Vector3(
+        x,
+        y,
+        z
+    );
+}
+
+
+/* =========================================
+   CALCUL DISTANCE MAIN
+========================================= */
+
+function handWidth(
+    points
+) {
+
+    if (
+        !points ||
+        points.length < 18
+    )
+        return 1;
+
+
+    const a =
+        landmarkTo3D(
+            points[5]
+        );
+
+
+    const b =
+        landmarkTo3D(
+            points[17]
+        );
+
+
+    return Math.max(
+        0.05,
+        a.distanceTo(b)
+    );
+}
+
+
+/* =========================================
+   MISE À JOUR MAIN 3D
+========================================= */
+
+function updateHand3D(
+    hand,
+    landmarks
+) {
+
+    if (!landmarks) {
+
+        hand.group.visible =
+            false;
+
+        return;
+    }
+
+
+    hand.group.visible =
+        true;
+
+
+    /*
+        Conversion des 21 points.
+    */
+
+    const target = [];
+
+
+    for (
+        let i = 0;
+        i < 21;
+        i++
+    ) {
+
+        target.push(
+            landmarkTo3D(
+                landmarks[i]
+            )
+        );
+    }
+
+
+    /*
+        Initialisation.
+    */
+
+    if (
+        hand.smooth.length !== 21
+    ) {
+
+        hand.smooth =
+            target.map(
+                p => p.clone()
+            );
+
+    }
+
+
+    /*
+        Lissage.
+    */
+
+    for (
+        let i = 0;
+        i < 21;
+        i++
+    ) {
+
+        hand.smooth[i].lerp(
+            target[i],
+            SMOOTHING
+        );
+
+
+        hand.joints[i].position.copy(
+            hand.smooth[i]
+        );
+    }
+
+
+    /*
+        Mise à jour du squelette
+        invisible de secours.
+    */
+
+    for (
+        const bone
+        of hand.bones
+    ) {
+
+        const a =
+            hand.smooth[
+                bone.a
+            ];
+
+
+        const b =
+            hand.smooth[
+                bone.b
+            ];
+
+
+        const direction =
+            new THREE.Vector3()
+            .subVectors(
+                b,
+                a
+            );
+
+
+        const length =
+            direction.length();
+
+
+        bone.mesh.position
+            .copy(a)
+            .add(
+                direction
+                .multiplyScalar(0.5)
+            );
+
+
+        bone.mesh.scale.set(
+            1,
+            length,
+            1
+        );
+
+
+        bone.mesh.quaternion
+            .setFromUnitVectors(
+                new THREE.Vector3(
+                    0,
+                    1,
+                    0
+                ),
+                direction.normalize()
+            );
+    }
+
+
+    /*
+        Taille approximative du modèle
+        par rapport à la main détectée.
+    */
+
+    if (
+        hand.model
+    ) {
+
+        const width =
+            handWidth(
+                landmarks
+            );
+
+
+        const scale =
+            width * 3.0;
+
+
+        hand.model.scale.setScalar(
+            scale
+        );
+
+
+        /*
+            On place le modèle sur
+            le poignet MediaPipe.
+        */
+
+        hand.model.position.copy(
+            hand.smooth[0]
+        );
+
+
+        /*
+            Orientation initiale.
+
+            Le modèle est gardé dans le
+            même plan que la caméra.
+        */
+
+        hand.model.rotation.set(
+            0,
+            0,
+            0
+        );
+    }
+}
+
+
+/* =========================================
+   RENDU 3D
+========================================= */
+
+function render3D() {
+
+    /*
+        Mise à jour des deux yeux.
+    */
+
+    for (
+        let i = 0;
+        i < 2;
+        i++
+    ) {
+
+        const handSet =
+            i === 0
+                ? leftHands
+                : rightHands;
+
+
+        const renderer =
+            renderers[i];
+
+
+        const canvas =
+            renderer.domElement;
+
+
+        const width =
+            canvas.clientWidth;
+
+
+        const height =
+            canvas.clientHeight;
+
+
+        if (
+            width <= 0 ||
+            height <= 0
+        ) {
+
+            continue;
+        }
+
+
+        renderer.setSize(
+            width,
+            height,
+            false
+        );
+
+
+        /*
+            Ajuste la caméra au ratio.
+        */
+
+        const camera =
+            cameras3D[i];
+
+
+        const aspect =
+            width / height;
+
+
+        camera.left =
+            -aspect;
+
+        camera.right =
+            aspect;
+
+        camera.top =
+            1;
+
+        camera.bottom =
+            -1;
+
+
+        camera.updateProjectionMatrix();
+
+
+        /*
+            Même résultat MediaPipe
+            dans les deux yeux.
+        */
+
+        for (
+            let h = 0;
+            h < handSet.length;
+            h++
+        ) {
+
+            updateHand3D(
+                handSet[h],
+                targetHands[h]
+            );
+        }
+
+
+        renderer.render(
+            scenes[i],
+            camera
+        );
+    }
+
+
+    requestAnimationFrame(
+        render3D
+    );
+}
+
+
+/* =========================================
    CANVAS
 ========================================= */
 
@@ -351,6 +1513,24 @@ function resizeCanvas() {
 
     canvasRight.height =
         canvasRight.clientHeight;
+
+
+    /*
+        Les canvas 3D gardent leur taille
+        CSS et le renderer s'adapte ensuite.
+    */
+
+    for (
+        const renderer
+        of renderers
+    ) {
+
+        renderer.setSize(
+            renderer.domElement.clientWidth,
+            renderer.domElement.clientHeight,
+            false
+        );
+    }
 }
 
 
@@ -416,7 +1596,7 @@ async function startCamera() {
 
 
     status.textContent =
-        "✅ Caméra arrière active";
+        "✅ Caméra arrière 320×240 • 30 FPS";
 
 
     resizeCanvas();
@@ -523,6 +1703,12 @@ function drawHands(
         const points = [];
 
 
+        /*
+            Caméra arrière :
+
+            Pas de miroir horizontal.
+        */
+
         for (
             const point
             of landmarks
@@ -545,7 +1731,9 @@ function drawHands(
         }
 
 
-        /* SQUELETTE */
+        /*
+            SQUELETTE
+        */
 
         ctx.beginPath();
 
@@ -575,7 +1763,9 @@ function drawHands(
         ctx.stroke();
 
 
-        /* POINTS */
+        /*
+            POINTS
+        */
 
         for (
             let i = 0;
@@ -643,6 +1833,10 @@ function trackingLoop() {
             videoLeft.currentTime;
 
 
+        /*
+            UNE SEULE détection MediaPipe.
+        */
+
         const result =
             detector.detectForVideo(
 
@@ -656,6 +1850,23 @@ function trackingLoop() {
         const hands =
             result.landmarks || [];
 
+
+        /*
+            Sauvegarde du résultat
+            pour le rendu 3D fluide.
+
+            Le renderer 3D tourne à part
+            à 60 FPS.
+        */
+
+        targetHands =
+            hands;
+
+
+        /*
+            Même tracking pour
+            les deux yeux.
+        */
 
         drawHands(
             ctxLeft,
@@ -680,7 +1891,7 @@ function trackingLoop() {
                 (hands.length > 1 ? "s" : "") +
                 " • " +
                 (hands.length * 21) +
-                " points";
+                " points • 3D";
 
         } else {
 
@@ -711,6 +1922,11 @@ fullscreen.addEventListener(
                 await document.documentElement
                     .requestFullscreen();
 
+
+                /*
+                    Essaye de passer
+                    le téléphone en paysage.
+                */
 
                 if (
                     screen.orientation &&
@@ -756,10 +1972,30 @@ start.addEventListener(
 
         try {
 
+            /*
+                1. Caméra arrière
+            */
+
             await startCamera();
+
+
+            /*
+                2. MediaPipe
+            */
 
             await startMediaPipe();
 
+
+            /*
+                3. GLB
+            */
+
+            await loadHandModel();
+
+
+            /*
+                4. Tracking
+            */
 
             fullscreen.style.display =
                 "block";
@@ -767,6 +2003,18 @@ start.addEventListener(
             start.style.display =
                 "none";
 
+
+            /*
+                Rendu 3D fluide.
+            */
+
+            render3D();
+
+
+            /*
+                Tracking MediaPipe
+                unique.
+            */
 
             trackingLoop();
 
