@@ -2,77 +2,542 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Test caméra</title>
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0,
+               maximum-scale=1.0, user-scalable=no">
+
+<title>Hand Tracking MediaPipe</title>
 
 <style>
 html, body {
     margin: 0;
+    padding: 0;
     width: 100%;
     height: 100%;
+    overflow: hidden;
     background: black;
-    color: white;
-    font-family: Arial;
-    text-align: center;
+    font-family: Arial, sans-serif;
 }
 
-video {
+#video {
+    position: fixed;
+    inset: 0;
     width: 100%;
-    height: 70%;
+    height: 100%;
     object-fit: cover;
-    background: #111;
+    transform: scaleX(-1);
 }
 
-button {
-    margin-top: 20px;
+#canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+#status {
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    right: 15px;
+    z-index: 10;
+
+    padding: 12px;
+    border-radius: 12px;
+
+    background: rgba(0,0,0,.7);
+    color: white;
+    text-align: center;
+    font-size: 15px;
+}
+
+#start {
+    position: fixed;
+    z-index: 20;
+
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+
     padding: 18px 25px;
+
+    border: 0;
+    border-radius: 15px;
+
+    background: white;
+    color: black;
+
     font-size: 18px;
+    font-weight: bold;
 }
 </style>
 </head>
 
 <body>
 
-<h2 id="status">Test caméra</h2>
+<video id="video"
+       autoplay
+       playsinline
+       muted>
+</video>
 
-<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
 
-<br>
+<div id="status">
+    Appuie pour démarrer
+</div>
 
-<button id="start">📷 Ouvrir la caméra</button>
+<button id="start">
+    📷 Démarrer
+</button>
 
-<script>
 
-const video = document.getElementById("video");
-const status = document.getElementById("status");
-const button = document.getElementById("start");
+<script type="module">
 
-button.onclick = async () => {
+import {
+    HandLandmarker,
+    FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22";
 
-    status.textContent = "Demande de caméra...";
 
-    try {
+const video =
+    document.getElementById("video");
 
-        const stream =
-            await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: false
-            });
+const canvas =
+    document.getElementById("canvas");
 
-        video.srcObject = stream;
+const ctx =
+    canvas.getContext("2d");
 
-        status.textContent = "✅ CAMÉRA OK";
+const status =
+    document.getElementById("status");
 
-    } catch (error) {
+const start =
+    document.getElementById("start");
 
-        status.textContent =
-            "❌ " + error.name + " : " + error.message;
 
-        console.error(error);
+let handLandmarker = null;
+
+let lastTime = -1;
+
+
+/*
+========================================
+CONNEXIONS DES MAINS
+========================================
+*/
+
+const connections = [
+
+    [0,1],
+    [1,2],
+    [2,3],
+    [3,4],
+
+    [0,5],
+    [5,6],
+    [6,7],
+    [7,8],
+
+    [0,9],
+    [9,10],
+    [10,11],
+    [11,12],
+
+    [0,13],
+    [13,14],
+    [14,15],
+    [15,16],
+
+    [0,17],
+    [17,18],
+    [18,19],
+    [19,20],
+
+    [5,9],
+    [9,13],
+    [13,17]
+];
+
+
+/*
+========================================
+CANVAS
+========================================
+*/
+
+function resize() {
+
+    canvas.width =
+        window.innerWidth;
+
+    canvas.height =
+        window.innerHeight;
+}
+
+resize();
+
+window.addEventListener(
+    "resize",
+    resize
+);
+
+
+/*
+========================================
+MEDIA PIPE
+========================================
+*/
+
+async function loadMediaPipe() {
+
+    status.textContent =
+        "⏳ Chargement de MediaPipe...";
+
+
+    const vision =
+        await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+        );
+
+
+    status.textContent =
+        "⏳ Chargement du modèle...";
+
+
+    handLandmarker =
+        await HandLandmarker.createFromOptions(
+            vision,
+            {
+                baseOptions: {
+
+                    modelAssetPath:
+                        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+
+                    delegate: "GPU"
+                },
+
+                runningMode: "VIDEO",
+
+                numHands: 2,
+
+                minHandDetectionConfidence: 0.5,
+
+                minHandPresenceConfidence: 0.5,
+
+                minTrackingConfidence: 0.5
+            }
+        );
+
+
+    status.textContent =
+        "✅ MediaPipe prêt";
+}
+
+
+/*
+========================================
+CAMÉRA
+========================================
+*/
+
+async function startCamera() {
+
+    status.textContent =
+        "📷 Demande de permission...";
+
+
+    const stream =
+        await navigator.mediaDevices.getUserMedia({
+
+            video: true,
+
+            audio: false
+        });
+
+
+    video.srcObject =
+        stream;
+
+
+    await video.play();
+
+
+    status.textContent =
+        "📷 Caméra active";
+
+
+    start.style.display =
+        "none";
+}
+
+
+/*
+========================================
+DESSIN MAIN
+========================================
+*/
+
+function drawHand(landmarks) {
+
+    const points = [];
+
+
+    for (const landmark of landmarks) {
+
+        /*
+            La vidéo est miroir.
+        */
+
+        const x =
+            canvas.width -
+            landmark.x * canvas.width;
+
+        const y =
+            landmark.y *
+            canvas.height;
+
+
+        points.push({
+            x: x,
+            y: y
+        });
     }
-};
+
+
+    /*
+        Lignes
+    */
+
+    ctx.beginPath();
+
+    ctx.lineWidth = 4;
+
+    ctx.strokeStyle =
+        "#00ff88";
+
+
+    for (const [a,b] of connections) {
+
+        ctx.moveTo(
+            points[a].x,
+            points[a].y
+        );
+
+        ctx.lineTo(
+            points[b].x,
+            points[b].y
+        );
+    }
+
+    ctx.stroke();
+
+
+    /*
+        21 points
+    */
+
+    for (
+        let i = 0;
+        i < points.length;
+        i++
+    ) {
+
+        const p =
+            points[i];
+
+
+        ctx.beginPath();
+
+        ctx.arc(
+            p.x,
+            p.y,
+            7,
+            0,
+            Math.PI * 2
+        );
+
+
+        ctx.fillStyle =
+            "#ff1744";
+
+        ctx.fill();
+
+
+        ctx.lineWidth = 2;
+
+        ctx.strokeStyle =
+            "white";
+
+        ctx.stroke();
+
+
+        /*
+            Numéro
+        */
+
+        ctx.font =
+            "bold 12px Arial";
+
+        ctx.fillStyle =
+            "white";
+
+        ctx.fillText(
+            i,
+            p.x + 9,
+            p.y - 9
+        );
+    }
+}
+
+
+/*
+========================================
+TRACKING
+========================================
+*/
+
+function detectHands() {
+
+    if (
+        !handLandmarker ||
+        video.readyState < 2
+    ) {
+
+        requestAnimationFrame(
+            detectHands
+        );
+
+        return;
+    }
+
+
+    if (
+        video.currentTime !==
+        lastTime
+    ) {
+
+        lastTime =
+            video.currentTime;
+
+
+        const results =
+            handLandmarker.detectForVideo(
+                video,
+                performance.now()
+            );
+
+
+        ctx.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+
+        if (
+            results.landmarks &&
+            results.landmarks.length
+        ) {
+
+            const count =
+                results.landmarks.length;
+
+
+            status.textContent =
+                "🖐️ " +
+                count +
+                " main" +
+                (count > 1 ? "s" : "") +
+                " • " +
+                count * 21 +
+                " points";
+
+
+            for (
+                const hand
+                of results.landmarks
+            ) {
+
+                drawHand(hand);
+            }
+
+        } else {
+
+            status.textContent =
+                "🔎 Aucune main détectée";
+        }
+    }
+
+
+    requestAnimationFrame(
+        detectHands
+    );
+}
+
+
+/*
+========================================
+BOUTON
+========================================
+*/
+
+start.addEventListener(
+    "click",
+    async () => {
+
+        start.disabled =
+            true;
+
+
+        try {
+
+            /*
+                D'abord la caméra.
+                On sait déjà qu'elle fonctionne
+                sur ton Vercel.
+            */
+
+            await startCamera();
+
+
+            /*
+                Ensuite MediaPipe.
+            */
+
+            await loadMediaPipe();
+
+
+            /*
+                Puis tracking.
+            */
+
+            detectHands();
+
+        }
+
+        catch (error) {
+
+            console.error(error);
+
+            status.textContent =
+                "❌ " +
+                error.name +
+                ": " +
+                error.message;
+
+            start.style.display =
+                "block";
+
+            start.disabled =
+                false;
+        }
+    }
+);
 
 </script>
 
 </body>
-</html>
+</html
