@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width,
+               initial-scale=1.0,
+               maximum-scale=1.0,
+               user-scalable=no">
+
+<title>MediaPipe Hand Tracking</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial, sans-serif;
+}
+
+#container {
+    position: fixed;
+    inset: 0;
+    background: #000;
+}
+
+#video {
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    object-fit: cover;
+
+    transform: scaleX(-1);
+
+    background: #000;
+}
+
+#canvas {
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    pointer-events: none;
+}
+
+#info {
+    position: fixed;
+
+    top: 15px;
+    left: 15px;
+    right: 15px;
+
+    z-index: 10;
+
+    padding: 12px 15px;
+
+    border-radius: 14px;
+
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+
+    font-size: 14px;
+    text-align: center;
+
+    backdrop-filter: blur(8px);
+}
+
+#start {
+    position: fixed;
+
+    left: 50%;
+    top: 50%;
+
+    transform: translate(-50%, -50%);
+
+    z-index: 20;
+
+    border: 0;
+    border-radius: 16px;
+
+    padding: 17px 25px;
+
+    background: white;
+    color: black;
+
+    font-size: 18px;
+    font-weight: bold;
+}
+
+#start:active {
+    transform: translate(-50%, -50%) scale(0.95);
+}
+
+#error {
+    display: none;
+
+    position: fixed;
+
+    left: 15px;
+    right: 15px;
+    bottom: 20px;
+
+    z-index: 30;
+
+    padding: 15px;
+
+    border-radius: 14px;
+
+    background: rgba(120, 0, 0, 0.9);
+    color: white;
+
+    font-size: 14px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="container">
+
+    <video
+        id="video"
+        autoplay
+        playsinline
+        muted>
+    </video>
+
+    <canvas id="canvas"></canvas>
+
+</div>
+
+<div id="info">
+    Appuie sur le bouton pour démarrer
+</div>
+
+<button id="start">
+    📷 Autoriser la caméra
+</button>
+
+<div id="error"></div>
+
+
+<script type="module">
+
+import {
+    HandLandmarker,
+    FilesetResolver
+}
+from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22";
+
+
+const video =
+    document.getElementById("video");
+
+const canvas =
+    document.getElementById("canvas");
+
+const ctx =
+    canvas.getContext("2d");
+
+const info =
+    document.getElementById("info");
+
+const startButton =
+    document.getElementById("start");
+
+const errorBox =
+    document.getElementById("error");
+
+
+let handLandmarker = null;
+
+let lastVideoTime = -1;
+
+
+/*
+==================================================
+CONNEXIONS DES 21 POINTS
+==================================================
+*/
+
+const connections = [
+
+    // Pouce
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+
+    // Index
+    [0, 5],
+    [5, 6],
+    [6, 7],
+    [7, 8],
+
+    // Majeur
+    [0, 9],
+    [9, 10],
+    [10, 11],
+    [11, 12],
+
+    // Annulaire
+    [0, 13],
+    [13, 14],
+    [14, 15],
+    [15, 16],
+
+    // Auriculaire
+    [0, 17],
+    [17, 18],
+    [18, 19],
+    [19, 20],
+
+    // Paume
+    [5, 9],
+    [9, 13],
+    [13, 17]
+];
+
+
+/*
+==================================================
+REDIMENSIONNEMENT
+==================================================
+*/
+
+function resizeCanvas() {
+
+    canvas.width =
+        window.innerWidth;
+
+    canvas.height =
+        window.innerHeight;
+}
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
+);
+
+resizeCanvas();
+
+
+/*
+==================================================
+AFFICHAGE ERREUR
+==================================================
+*/
+
+function showError(message) {
+
+    errorBox.textContent =
+        "❌ " + message;
+
+    errorBox.style.display =
+        "block";
+}
+
+
+/*
+==================================================
+MEDIA PIPE
+==================================================
+*/
+
+async function initMediaPipe() {
+
+    info.textContent =
+        "⏳ Chargement de MediaPipe...";
+
+
+    const vision =
+        await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+        );
+
+
+    handLandmarker =
+        await HandLandmarker.createFromOptions(
+            vision,
+            {
+
+                baseOptions: {
+
+                    modelAssetPath:
+                        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+
+                    delegate: "GPU"
+                },
+
+
+                runningMode: "VIDEO",
+
+
+                numHands: 2,
+
+
+                minHandDetectionConfidence:
+                    0.5,
+
+                minHandPresenceConfidence:
+                    0.5,
+
+                minTrackingConfidence:
+                    0.5
+            }
+        );
+
+
+    info.textContent =
+        "✔ MediaPipe chargé";
+}
+
+
+/*
+==================================================
+CAMÉRA
+==================================================
+*/
+
+async function startCamera() {
+
+    /*
+        Vérification du navigateur
+    */
+
+    if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+    ) {
+
+        showError(
+            "La caméra n'est pas disponible. Utilise HTTPS ou localhost."
+        );
+
+        return false;
+    }
+
+
+    info.textContent =
+        "📷 Demande d'autorisation caméra...";
+
+
+    try {
+
+        /*
+            DEMANDE DE PERMISSION ANDROID
+        */
+
+        const stream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video: {
+
+                    facingMode: "user",
+
+                    width: {
+                        ideal: 1280
+                    },
+
+                    height: {
+                        ideal: 720
+                    },
+
+                    frameRate: {
+                        ideal: 30,
+                        max: 60
+                    }
+                },
+
+                audio: false
+            });
+
+
+        /*
+            Caméra obtenue
+        */
+
+        video.srcObject =
+            stream;
+
+
+        await video.play();
+
+
+        info.textContent =
+            "🖐️ Caméra active • recherche des mains...";
+
+
+        startButton.style.display =
+            "none";
+
+
+        resizeCanvas();
+
+
+        requestAnimationFrame(
+            processVideo
+        );
+
+
+        return true;
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+
+        if (
+            error.name ===
+            "NotAllowedError"
+        ) {
+
+            showError(
+                "Permission caméra refusée. Autorise la caméra dans Chrome."
+            );
+
+        }
+
+        else if (
+            error.name ===
+            "NotFoundError"
+        ) {
+
+            showError(
+                "Aucune caméra trouvée."
+            );
+
+        }
+
+        else if (
+            error.name ===
+            "NotReadableError"
+        ) {
+
+            showError(
+                "La caméra est déjà utilisée par une autre application."
+            );
+
+        }
+
+        else {
+
+            showError(
+                "Erreur caméra : " +
+                error.message
+            );
+        }
+
+
+        info.textContent =
+            "❌ Caméra inaccessible";
+
+
+        return false;
+    }
+}
+
+
+/*
+==================================================
+DESSIN D'UNE MAIN
+==================================================
+*/
+
+function drawHand(landmarks, index) {
+
+    const points =
+        landmarks.map(point => {
+
+            /*
+                MediaPipe :
+                x = 0 → gauche
+                x = 1 → droite
+
+                La vidéo est retournée,
+                donc on retourne aussi les points.
+            */
+
+            const x =
+                canvas.width -
+                (point.x *
+                 canvas.width);
+
+            const y =
+                point.y *
+                canvas.height;
+
+
+            return {
+                x: x,
+                y: y,
+                z: point.z
+            };
+        });
+
+
+    /*
+        LIGNES
+    */
+
+    ctx.lineWidth = 3;
+
+    ctx.strokeStyle =
+        "#00ff88";
+
+
+    for (
+        const [a, b]
+        of connections
+    ) {
+
+        const p1 =
+            points[a];
+
+        const p2 =
+            points[b];
+
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            p1.x,
+            p1.y
+        );
+
+        ctx.lineTo(
+            p2.x,
+            p2.y
+        );
+
+        ctx.stroke();
+    }
+
+
+    /*
+        POINTS
+    */
+
+    for (
+        let i = 0;
+        i < points.length;
+        i++
+    ) {
+
+        const p =
+            points[i];
+
+
+        ctx.beginPath();
+
+        ctx.arc(
+            p.x,
+            p.y,
+            6,
+            0,
+            Math.PI * 2
+        );
+
+
+        ctx.fillStyle =
+            "#ff1744";
+
+        ctx.fill();
+
+
+        ctx.lineWidth = 2;
+
+        ctx.strokeStyle =
+            "#ffffff";
+
+        ctx.stroke();
+
+
+        /*
+            Numéro du point
+        */
+
+        ctx.font =
+            "bold 11px Arial";
+
+        ctx.fillStyle =
+            "#ffffff";
+
+
+        ctx.fillText(
+            i,
+            p.x + 8,
+            p.y - 8
+        );
+    }
+}
+
+
+/*
+==================================================
+TRAITEMENT VIDÉO
+==================================================
+*/
+
+function processVideo() {
+
+    if (
+        !handLandmarker ||
+        video.readyState < 2
+    ) {
+
+        requestAnimationFrame(
+            processVideo
+        );
+
+        return;
+    }
+
+
+    /*
+        Évite de traiter deux fois
+        exactement la même frame.
+    */
+
+    if (
+        video.currentTime !==
+        lastVideoTime
+    ) {
+
+        lastVideoTime =
+            video.currentTime;
+
+
+        const timestamp =
+            performance.now();
+
+
+        const results =
+            handLandmarker.detectForVideo(
+                video,
+                timestamp
+            );
+
+
+        /*
+            Nettoyage
+        */
+
+        ctx.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+
+        /*
+            MAINS DÉTECTÉES
+        */
+
+        if (
+            results.landmarks &&
+            results.landmarks.length > 0
+        ) {
+
+            const count =
+                results.landmarks.length;
+
+
+            info.textContent =
+                "🖐️ " +
+                count +
+                " main" +
+                (count > 1 ? "s" : "") +
+                " • " +
+                (count * 21) +
+                " points";
+
+
+            /*
+                Dessine chaque main
+            */
+
+            for (
+                let i = 0;
+                i < count;
+                i++
+            ) {
+
+                drawHand(
+                    results.landmarks[i],
+                    i
+                );
+            }
+
+        }
+
+        else {
+
+            info.textContent =
+                "🖐️ Aucune main détectée";
+        }
+    }
+
+
+    requestAnimationFrame(
+        processVideo
+    );
+}
+
+
+/*
+==================================================
+BOUTON
+==================================================
+*/
+
+startButton.addEventListener(
+    "click",
+    async () => {
+
+        startButton.disabled =
+            true;
+
+
+        try {
+
+            /*
+                Initialise MediaPipe
+            */
+
+            await initMediaPipe();
+
+
+            /*
+                Demande la caméra
+            */
+
+            const success =
+                await startCamera();
+
+
+            if (!success) {
+
+                startButton.disabled =
+                    false;
+            }
+
+        }
+
+        catch (error) {
+
+            console.error(error);
+
+
+            showError(
+                "Erreur MediaPipe : " +
+                error.message
+            );
+
+
+            info.textContent =
+                "❌ MediaPipe n'a pas pu démarrer";
+
+
+            startButton.disabled =
+                false;
+        }
+    }
+);
+
+</script>
+
+</body>
+</html>
