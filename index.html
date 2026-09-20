@@ -1,848 +1,319 @@
 <!DOCTYPE html>
 <html lang="fr">
-
 <head>
 <meta charset="UTF-8">
-
-<meta name="viewport"
-      content="width=device-width,
-               initial-scale=1.0,
-               maximum-scale=1.0,
-               user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
 <title>Hand Tracking VR</title>
 
 <style>
-
-* {
-    box-sizing: border-box;
-}
-
 html, body {
     margin: 0;
     padding: 0;
-
     width: 100%;
     height: 100%;
-
     overflow: hidden;
-
-    background: #000;
-
-    font-family: Arial, sans-serif;
+    background: black;
 }
-
-
-/* =========================================
-   VUE CARDBOARD
-========================================= */
 
 #vr {
-    position: fixed;
-
-    inset: 0;
-
     display: flex;
-
-    width: 100%;
-    height: 100%;
-
-    background: #000;
+    width: 100vw;
+    height: 100vh;
 }
-
-
-/* Chaque œil */
 
 .eye {
     position: relative;
-
     width: 50%;
     height: 100%;
-
     overflow: hidden;
-
-    background: #000;
 }
 
-
-/* Vidéo */
-
-.eye video {
+video {
     position: absolute;
-
-    left: 0;
-    top: 0;
-
     width: 100%;
     height: 100%;
-
     object-fit: cover;
-
-    transform: scaleX(-1);
-
-    background: #000;
+    transform: none;
 }
 
-
-/* Canvas des points */
-
-.eye canvas {
+canvas {
     position: absolute;
-
-    left: 0;
-    top: 0;
-
+    inset: 0;
     width: 100%;
     height: 100%;
-
     pointer-events: none;
 }
-
-
-/* Ligne centrale */
-
-#middle {
-    position: fixed;
-
-    left: 50%;
-    top: 0;
-
-    width: 2px;
-    height: 100%;
-
-    transform: translateX(-1px);
-
-    background: rgba(255,255,255,.25);
-
-    z-index: 20;
-
-    pointer-events: none;
-}
-
-
-/* =========================================
-   INTERFACE
-========================================= */
-
-#status {
-    position: fixed;
-
-    top: 12px;
-    left: 12px;
-    right: 12px;
-
-    z-index: 50;
-
-    padding: 10px;
-
-    border-radius: 12px;
-
-    background: rgba(0,0,0,.75);
-
-    color: white;
-
-    text-align: center;
-
-    font-size: 14px;
-
-    pointer-events: none;
-}
-
-
-/* Bouton caméra */
 
 #start {
     position: fixed;
-
+    z-index: 10;
+    top: 20px;
     left: 50%;
-    top: 50%;
-
-    transform: translate(-50%, -50%);
-
-    z-index: 100;
-
-    padding: 18px 26px;
-
-    border: none;
-
-    border-radius: 16px;
-
-    background: white;
-
-    color: black;
-
+    transform: translateX(-50%);
+    padding: 14px 22px;
     font-size: 18px;
-
-    font-weight: bold;
+    border: 0;
+    border-radius: 12px;
 }
-
-
-/* Bouton plein écran */
 
 #fullscreen {
     position: fixed;
-
-    right: 15px;
-    bottom: 15px;
-
-    z-index: 100;
-
-    width: 55px;
-    height: 55px;
-
-    border: none;
-
-    border-radius: 50%;
-
-    background: rgba(0,0,0,.75);
-
-    color: white;
-
-    font-size: 24px;
-
-    display: none;
+    z-index: 10;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 20px;
+    font-size: 16px;
+    border: 0;
+    border-radius: 12px;
 }
-
-
-/* En plein écran */
-
-:fullscreen #status {
-    top: 8px;
-}
-
 </style>
 </head>
 
-
 <body>
 
-
-<!-- =========================================
-     CARDBOARD
-========================================= -->
+<button id="start">Démarrer</button>
+<button id="fullscreen">Plein écran</button>
 
 <div id="vr">
 
-    <!-- ŒIL GAUCHE -->
-
     <div class="eye">
-
-        <video
-            id="videoLeft"
-            autoplay
-            playsinline
-            muted>
-        </video>
-
+        <video id="videoLeft" autoplay playsinline muted></video>
         <canvas id="canvasLeft"></canvas>
-
     </div>
-
-
-    <!-- ŒIL DROIT -->
 
     <div class="eye">
-
-        <video
-            id="videoRight"
-            autoplay
-            playsinline
-            muted>
-        </video>
-
+        <video id="videoRight" autoplay playsinline muted></video>
         <canvas id="canvasRight"></canvas>
-
     </div>
 
 </div>
-
-
-<div id="middle"></div>
-
-
-<div id="status">
-    Prêt
-</div>
-
-
-<button id="start">
-    📷 Démarrer VR
-</button>
-
-
-<button id="fullscreen">
-    ⛶
-</button>
-
-
 
 <script type="module">
 
+import {
+    HandLandmarker,
+    FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
 
-/* =========================================
-   ÉLÉMENTS
-========================================= */
+const startButton = document.getElementById("start");
+const fullscreenButton = document.getElementById("fullscreen");
 
-const videoLeft =
-    document.getElementById("videoLeft");
+const videoLeft = document.getElementById("videoLeft");
+const videoRight = document.getElementById("videoRight");
 
-const videoRight =
-    document.getElementById("videoRight");
+const canvasLeft = document.getElementById("canvasLeft");
+const canvasRight = document.getElementById("canvasRight");
 
-const canvasLeft =
-    document.getElementById("canvasLeft");
+const ctxLeft = canvasLeft.getContext("2d");
+const ctxRight = canvasRight.getContext("2d");
 
-const canvasRight =
-    document.getElementById("canvasRight");
-
-const ctxLeft =
-    canvasLeft.getContext("2d");
-
-const ctxRight =
-    canvasRight.getContext("2d");
-
-const status =
-    document.getElementById("status");
-
-const start =
-    document.getElementById("start");
-
-const fullscreen =
-    document.getElementById("fullscreen");
-
-
-let detector = null;
-
+let detector;
+let running = false;
 let lastVideoTime = -1;
 
+startButton.onclick = async () => {
 
-/* =========================================
-   CONNEXIONS MAIN
-========================================= */
+    startButton.style.display = "none";
 
-const connections = [
+    try {
 
-    [0,1],
-    [1,2],
-    [2,3],
-    [3,4],
-
-    [0,5],
-    [5,6],
-    [6,7],
-    [7,8],
-
-    [0,9],
-    [9,10],
-    [10,11],
-    [11,12],
-
-    [0,13],
-    [13,14],
-    [14,15],
-    [15,16],
-
-    [0,17],
-    [17,18],
-    [18,19],
-    [19,20],
-
-    [5,9],
-    [9,13],
-    [13,17]
-
-];
-
-
-/* =========================================
-   CANVAS
-========================================= */
-
-function resizeCanvas() {
-
-    canvasLeft.width =
-        canvasLeft.clientWidth;
-
-    canvasLeft.height =
-        canvasLeft.clientHeight;
-
-
-    canvasRight.width =
-        canvasRight.clientWidth;
-
-    canvasRight.height =
-        canvasRight.clientHeight;
-}
-
-
-window.addEventListener(
-    "resize",
-    resizeCanvas
-);
-
-resizeCanvas();
-
-
-/* =========================================
-   CAMÉRA FRONTALE
-========================================= */
-
-async function startCamera() {
-
-    status.textContent =
-        "📷 Demande caméra frontale...";
-
-
-    const stream =
-        await navigator.mediaDevices
-        .getUserMedia({
-
+        const stream = await navigator.mediaDevices.getUserMedia({
             video: {
-
-                facingMode: {
-                    ideal: "user"
-                },
+                facingMode: { ideal: "environment" },
 
                 width: {
-                    ideal: 1280
+                    exact: 320
                 },
 
                 height: {
-                    ideal: 720
+                    exact: 240
                 },
 
                 frameRate: {
-                    ideal: 30,
-                    max: 60
+                    exact: 30
                 }
             },
 
             audio: false
         });
 
+        videoLeft.srcObject = stream;
+        videoRight.srcObject = stream;
 
-    /*
-        Même caméra dans les deux yeux.
-    */
+        await videoLeft.play();
+        await videoRight.play();
 
-    videoLeft.srcObject =
-        stream;
+        canvasLeft.width = 320;
+        canvasLeft.height = 240;
 
-    videoRight.srcObject =
-        stream;
+        canvasRight.width = 320;
+        canvasRight.height = 240;
 
-
-    await videoLeft.play();
-
-    await videoRight.play();
-
-
-    status.textContent =
-        "✅ Caméra frontale active";
-
-
-    resizeCanvas();
-}
-
-
-/* =========================================
-   MEDIAPIPE
-========================================= */
-
-async function startMediaPipe() {
-
-    status.textContent =
-        "⏳ Chargement MediaPipe...";
-
-
-    const {
-        HandLandmarker,
-        FilesetResolver
-    } = await import(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs"
-    );
-
-
-    status.textContent =
-        "⏳ Chargement moteur...";
-
-
-    const vision =
-        await FilesetResolver.forVisionTasks(
-
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
         );
 
-
-    status.textContent =
-        "⏳ Chargement modèle mains...";
-
-
-    detector =
-        await HandLandmarker
-        .createFromOptions(
-
+        detector = await HandLandmarker.createFromOptions(
             vision,
-
             {
-
                 baseOptions: {
-
                     modelAssetPath:
                         "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
 
                     delegate: "GPU"
                 },
 
-
                 runningMode: "VIDEO",
-
 
                 numHands: 2,
 
+                minHandDetectionConfidence: 0.5,
 
-                minHandDetectionConfidence:
-                    0.5,
+                minHandPresenceConfidence: 0.5,
 
-                minHandPresenceConfidence:
-                    0.5,
-
-                minTrackingConfidence:
-                    0.5
+                minTrackingConfidence: 0.5
             }
         );
 
+        running = true;
 
-    status.textContent =
-        "✅ VR + MediaPipe prêts";
+        detectHands();
+
+    } catch (error) {
+
+        console.error(error);
+
+        startButton.style.display = "block";
+
+        alert(
+            "Erreur caméra ou MediaPipe :\n\n" +
+            error.message
+        );
+    }
+};
+
+
+function detectHands() {
+
+    if (!running || !detector) {
+        return;
+    }
+
+    if (
+        videoLeft.readyState >= 2 &&
+        videoLeft.currentTime !== lastVideoTime
+    ) {
+
+        lastVideoTime = videoLeft.currentTime;
+
+        const results = detector.detectForVideo(
+            videoLeft,
+            performance.now()
+        );
+
+        drawHands(ctxLeft, results);
+
+        drawHands(ctxRight, results);
+    }
+
+    requestAnimationFrame(detectHands);
 }
 
 
-/* =========================================
-   DESSIN DES MAINS
-========================================= */
-
-function drawHands(
-    ctx,
-    canvas,
-    hands
-) {
+function drawHands(ctx, results) {
 
     ctx.clearRect(
         0,
         0,
-        canvas.width,
-        canvas.height
+        canvasLeft.width,
+        canvasLeft.height
     );
 
+    if (!results.landmarks) {
+        return;
+    }
 
-    for (
-        const landmarks
-        of hands
-    ) {
+    for (const landmarks of results.landmarks) {
 
-        const points = [];
+        // Connexions de la main
+        const connections = [
+            [0,1],[1,2],[2,3],[3,4],
+            [0,5],[5,6],[6,7],[7,8],
+            [5,9],[9,10],[10,11],[11,12],
+            [9,13],[13,14],[14,15],[15,16],
+            [13,17],[17,18],[18,19],[19,20],
+            [0,17]
+        ];
 
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "red";
 
-        /*
-            Conversion coordonnées
-            MediaPipe → écran
-        */
+        for (const [a, b] of connections) {
 
-        for (
-            const point
-            of landmarks
-        ) {
-
-            const x =
-                canvas.width -
-                point.x *
-                canvas.width;
-
-
-            const y =
-                point.y *
-                canvas.height;
-
-
-            points.push({
-                x,
-                y
-            });
-        }
-
-
-        /*
-            SQUELETTE
-        */
-
-        ctx.beginPath();
-
-        ctx.strokeStyle =
-            "#00ff88";
-
-        ctx.lineWidth = 3;
-
-
-        for (
-            const [a,b]
-            of connections
-        ) {
+            ctx.beginPath();
 
             ctx.moveTo(
-                points[a].x,
-                points[a].y
+                landmarks[a].x * 320,
+                landmarks[a].y * 240
             );
 
             ctx.lineTo(
-                points[b].x,
-                points[b].y
+                landmarks[b].x * 320,
+                landmarks[b].y * 240
             );
+
+            ctx.stroke();
         }
 
-
-        ctx.stroke();
-
-
-        /*
-            POINTS
-        */
-
-        for (
-            let i = 0;
-            i < points.length;
-            i++
-        ) {
-
-            const p =
-                points[i];
-
+        // 21 points
+        for (const point of landmarks) {
 
             ctx.beginPath();
 
             ctx.arc(
-                p.x,
-                p.y,
-                5,
+                point.x * 320,
+                point.y * 240,
+                3,
                 0,
                 Math.PI * 2
             );
 
-
-            ctx.fillStyle =
-                "#ff1744";
-
+            ctx.fillStyle = "lime";
             ctx.fill();
-
-
-            ctx.strokeStyle =
-                "#fff";
-
-            ctx.lineWidth = 2;
-
-            ctx.stroke();
         }
     }
 }
 
 
-/* =========================================
-   TRACKING
-========================================= */
+fullscreenButton.onclick = async () => {
 
-function trackingLoop() {
+    try {
 
-    if (
-        !detector ||
-        videoLeft.readyState < 2
-    ) {
+        if (!document.fullscreenElement) {
 
-        requestAnimationFrame(
-            trackingLoop
-        );
-
-        return;
-    }
-
-
-    if (
-        videoLeft.currentTime !==
-        lastVideoTime
-    ) {
-
-        lastVideoTime =
-            videoLeft.currentTime;
-
-
-        const result =
-            detector.detectForVideo(
-
-                videoLeft,
-
-                performance.now()
-
-            );
-
-
-        const hands =
-            result.landmarks || [];
-
-
-        /*
-            Même tracking pour
-            les deux yeux.
-        */
-
-        drawHands(
-            ctxLeft,
-            canvasLeft,
-            hands
-        );
-
-
-        drawHands(
-            ctxRight,
-            canvasRight,
-            hands
-        );
-
-
-        if (hands.length > 0) {
-
-            status.textContent =
-                "🖐️ " +
-                hands.length +
-                " main" +
-                (hands.length > 1 ? "s" : "") +
-                " • " +
-                (hands.length * 21) +
-                " points";
+            await document.documentElement.requestFullscreen();
 
         } else {
 
-            status.textContent =
-                "🥽 VR active • aucune main";
+            await document.exitFullscreen();
+
         }
+
+        if (screen.orientation?.lock) {
+
+            try {
+                await screen.orientation.lock("landscape");
+            } catch (e) {}
+        }
+
+    } catch (error) {
+
+        console.error(error);
+
     }
-
-
-    requestAnimationFrame(
-        trackingLoop
-    );
-}
-
-
-/* =========================================
-   PLEIN ÉCRAN
-========================================= */
-
-fullscreen.addEventListener(
-    "click",
-    async () => {
-
-        try {
-
-            if (!document.fullscreenElement) {
-
-                await document.documentElement
-                    .requestFullscreen();
-
-                /*
-                    Essaye de passer
-                    le téléphone en paysage.
-                */
-
-                if (
-                    screen.orientation &&
-                    screen.orientation.lock
-                ) {
-
-                    try {
-
-                        await screen.orientation
-                            .lock("landscape");
-
-                    } catch(e) {
-
-                        console.log(
-                            "Orientation non verrouillable"
-                        );
-                    }
-                }
-
-            } else {
-
-                await document.exitFullscreen();
-            }
-
-        } catch(error) {
-
-            console.error(error);
-        }
-    }
-);
-
-
-/* =========================================
-   DÉMARRAGE
-========================================= */
-
-start.addEventListener(
-    "click",
-    async () => {
-
-        start.disabled = true;
-
-
-        try {
-
-            /*
-                1. Caméra frontale
-            */
-
-            await startCamera();
-
-
-            /*
-                2. MediaPipe
-            */
-
-            await startMediaPipe();
-
-
-            /*
-                3. Tracking
-            */
-
-            fullscreen.style.display =
-                "block";
-
-            start.style.display =
-                "none";
-
-
-            trackingLoop();
-
-        }
-
-        catch(error) {
-
-            console.error(error);
-
-
-            status.textContent =
-                "❌ " +
-                error.name +
-                " : " +
-                error.message;
-
-
-            start.disabled =
-                false;
-        }
-    }
-);
+};
 
 </script>
 
