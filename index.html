@@ -2,24 +2,50 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport"
+      content="width=device-width,
+               initial-scale=1.0,
+               maximum-scale=1.0,
+               user-scalable=no">
 
 <title>Hand Tracking VR</title>
 
 <style>
-html, body {
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: black;
+    background: #000;
+    font-family: Arial, sans-serif;
 }
 
-#vr {
-    display: flex;
+body {
+    touch-action: none;
+}
+
+#app {
+    position: fixed;
+    inset: 0;
     width: 100vw;
     height: 100vh;
+    background: #000;
+}
+
+#vr-container {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
 }
 
 .eye {
@@ -27,68 +53,220 @@ html, body {
     width: 50%;
     height: 100%;
     overflow: hidden;
+    background: #000;
 }
 
-video {
+.camera {
     position: absolute;
+    left: 0;
+    top: 0;
+
     width: 100%;
     height: 100%;
+
     object-fit: cover;
+
     transform: none;
+
+    background: #000;
 }
 
-canvas {
+.hand-canvas {
     position: absolute;
-    inset: 0;
+    left: 0;
+    top: 0;
+
     width: 100%;
     height: 100%;
+
     pointer-events: none;
 }
 
-#start {
-    position: fixed;
-    z-index: 10;
-    top: 20px;
+#center-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
     left: 50%;
+
+    width: 1px;
+
+    background: rgba(255,255,255,0.35);
+
     transform: translateX(-50%);
-    padding: 14px 22px;
-    font-size: 18px;
-    border: 0;
-    border-radius: 12px;
+
+    pointer-events: none;
 }
 
-#fullscreen {
+#interface {
     position: fixed;
-    z-index: 10;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 12px 20px;
+    z-index: 100;
+
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 100%;
+
+    pointer-events: none;
+}
+
+#start-button,
+#fullscreen-button {
+    pointer-events: auto;
+
+    border: none;
+    outline: none;
+
+    color: white;
+    background: rgba(20,20,20,0.85);
+
+    border-radius: 14px;
+
+    padding: 13px 20px;
+
     font-size: 16px;
-    border: 0;
-    border-radius: 12px;
+    font-weight: bold;
+
+    box-shadow:
+        0 4px 15px rgba(0,0,0,0.5);
+
+    backdrop-filter: blur(8px);
+
+    cursor: pointer;
+}
+
+#start-button {
+    position: absolute;
+
+    left: 50%;
+    top: 50%;
+
+    transform: translate(-50%, -50%);
+}
+
+#fullscreen-button {
+    position: absolute;
+
+    right: 15px;
+    bottom: 15px;
+}
+
+#status {
+    position: absolute;
+
+    top: 15px;
+    left: 15px;
+
+    padding: 8px 12px;
+
+    color: white;
+
+    background: rgba(0,0,0,0.65);
+
+    border-radius: 10px;
+
+    font-size: 13px;
+
+    pointer-events: none;
+}
+
+#fps {
+    position: absolute;
+
+    top: 50px;
+    left: 15px;
+
+    padding: 6px 10px;
+
+    color: white;
+
+    background: rgba(0,0,0,0.65);
+
+    border-radius: 8px;
+
+    font-size: 12px;
+
+    pointer-events: none;
+}
+
+.hidden {
+    display: none !important;
 }
 </style>
 </head>
 
 <body>
 
-<button id="start">Démarrer</button>
-<button id="fullscreen">Plein écran</button>
+<div id="app">
 
-<div id="vr">
+    <div id="vr-container">
 
-    <div class="eye">
-        <video id="videoLeft" autoplay playsinline muted></video>
-        <canvas id="canvasLeft"></canvas>
+        <div class="eye">
+
+            <video
+                id="video-left"
+                class="camera"
+                autoplay
+                playsinline
+                muted>
+            </video>
+
+            <canvas
+                id="canvas-left"
+                class="hand-canvas"
+                width="320"
+                height="240">
+            </canvas>
+
+        </div>
+
+
+        <div class="eye">
+
+            <video
+                id="video-right"
+                class="camera"
+                autoplay
+                playsinline
+                muted>
+            </video>
+
+            <canvas
+                id="canvas-right"
+                class="hand-canvas"
+                width="320"
+                height="240">
+            </canvas>
+
+        </div>
+
+        <div id="center-line"></div>
+
     </div>
 
-    <div class="eye">
-        <video id="videoRight" autoplay playsinline muted></video>
-        <canvas id="canvasRight"></canvas>
+
+    <div id="interface">
+
+        <button id="start-button">
+            Démarrer
+        </button>
+
+        <button id="fullscreen-button">
+            ⛶ Plein écran
+        </button>
+
+        <div id="status">
+            Caméra arrêtée
+        </div>
+
+        <div id="fps">
+            FPS : 0
+        </div>
+
     </div>
 
 </div>
+
 
 <script type="module">
 
@@ -97,223 +275,793 @@ import {
     FilesetResolver
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
 
-const startButton = document.getElementById("start");
-const fullscreenButton = document.getElementById("fullscreen");
 
-const videoLeft = document.getElementById("videoLeft");
-const videoRight = document.getElementById("videoRight");
+/* =========================================================
+   CONFIGURATION
+========================================================= */
 
-const canvasLeft = document.getElementById("canvasLeft");
-const canvasRight = document.getElementById("canvasRight");
+const CONFIG = {
 
-const ctxLeft = canvasLeft.getContext("2d");
-const ctxRight = canvasRight.getContext("2d");
+    width: 320,
 
-let detector;
-let running = false;
-let lastVideoTime = -1;
+    height: 240,
 
-startButton.onclick = async () => {
+    fps: 30,
 
-    startButton.style.display = "none";
+    maxHands: 2,
 
-    try {
+    detectionConfidence: 0.5,
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: { ideal: "environment" },
+    presenceConfidence: 0.5,
 
-                width: {
-                    exact: 320
-                },
+    trackingConfidence: 0.5
 
-                height: {
-                    exact: 240
-                },
-
-                frameRate: {
-                    exact: 30
-                }
-            },
-
-            audio: false
-        });
-
-        videoLeft.srcObject = stream;
-        videoRight.srcObject = stream;
-
-        await videoLeft.play();
-        await videoRight.play();
-
-        canvasLeft.width = 320;
-        canvasLeft.height = 240;
-
-        canvasRight.width = 320;
-        canvasRight.height = 240;
-
-        const vision = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-        );
-
-        detector = await HandLandmarker.createFromOptions(
-            vision,
-            {
-                baseOptions: {
-                    modelAssetPath:
-                        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-
-                    delegate: "GPU"
-                },
-
-                runningMode: "VIDEO",
-
-                numHands: 2,
-
-                minHandDetectionConfidence: 0.5,
-
-                minHandPresenceConfidence: 0.5,
-
-                minTrackingConfidence: 0.5
-            }
-        );
-
-        running = true;
-
-        detectHands();
-
-    } catch (error) {
-
-        console.error(error);
-
-        startButton.style.display = "block";
-
-        alert(
-            "Erreur caméra ou MediaPipe :\n\n" +
-            error.message
-        );
-    }
 };
 
 
-function detectHands() {
+/* =========================================================
+   ELEMENTS
+========================================================= */
 
-    if (!running || !detector) {
-        return;
+const startButton =
+    document.getElementById("start-button");
+
+const fullscreenButton =
+    document.getElementById("fullscreen-button");
+
+const statusElement =
+    document.getElementById("status");
+
+const fpsElement =
+    document.getElementById("fps");
+
+
+const videoLeft =
+    document.getElementById("video-left");
+
+const videoRight =
+    document.getElementById("video-right");
+
+
+const canvasLeft =
+    document.getElementById("canvas-left");
+
+const canvasRight =
+    document.getElementById("canvas-right");
+
+
+const ctxLeft =
+    canvasLeft.getContext("2d");
+
+const ctxRight =
+    canvasRight.getContext("2d");
+
+
+/* =========================================================
+   VARIABLES
+========================================================= */
+
+let stream = null;
+
+let handLandmarker = null;
+
+let running = false;
+
+let lastVideoTime = -1;
+
+let lastDetectionTime = 0;
+
+let frameCounter = 0;
+
+let fpsTimer = performance.now();
+
+let currentFPS = 0;
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+function setStatus(text) {
+
+    statusElement.textContent = text;
+
+}
+
+
+/* =========================================================
+   CAMERA
+========================================================= */
+
+async function startCamera() {
+
+    setStatus("Demande caméra...");
+
+    try {
+
+        stream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video: {
+
+                    facingMode: {
+                        ideal: "environment"
+                    },
+
+                    width: {
+                        exact: CONFIG.width
+                    },
+
+                    height: {
+                        exact: CONFIG.height
+                    },
+
+                    frameRate: {
+                        exact: CONFIG.fps
+                    }
+
+                },
+
+                audio: false
+
+            });
+
+
+        videoLeft.srcObject = stream;
+
+        videoRight.srcObject = stream;
+
+
+        await videoLeft.play();
+
+        await videoRight.play();
+
+
+        setStatus("Caméra arrière active");
+
+        return true;
+
+    } catch (error) {
+
+        console.error(
+            "Erreur caméra :",
+            error
+        );
+
+        setStatus(
+            "Erreur caméra"
+        );
+
+        alert(
+            "Impossible d'utiliser la caméra.\n\n" +
+            error.message
+        );
+
+        return false;
+
     }
+
+}
+
+
+/* =========================================================
+   MEDIAPIPE
+========================================================= */
+
+async function initializeMediaPipe() {
+
+    setStatus(
+        "Chargement MediaPipe..."
+    );
+
+
+    try {
+
+        const vision =
+            await FilesetResolver.forVisionTasks(
+
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+
+            );
+
+
+        handLandmarker =
+            await HandLandmarker.createFromOptions(
+
+                vision,
+
+                {
+
+                    baseOptions: {
+
+                        modelAssetPath:
+                            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+
+                        delegate:
+                            "GPU"
+
+                    },
+
+
+                    runningMode:
+                        "VIDEO",
+
+
+                    numHands:
+                        CONFIG.maxHands,
+
+
+                    minHandDetectionConfidence:
+                        CONFIG.detectionConfidence,
+
+
+                    minHandPresenceConfidence:
+                        CONFIG.presenceConfidence,
+
+
+                    minTrackingConfidence:
+                        CONFIG.trackingConfidence
+
+                }
+
+            );
+
+
+        setStatus(
+            "MediaPipe actif"
+        );
+
+        return true;
+
+    } catch (error) {
+
+        console.error(
+            "Erreur MediaPipe :",
+            error
+        );
+
+        setStatus(
+            "Erreur MediaPipe"
+        );
+
+        alert(
+            "Impossible de charger MediaPipe.\n\n" +
+            error.message
+        );
+
+        return false;
+
+    }
+
+}
+
+
+/* =========================================================
+   START
+========================================================= */
+
+async function start() {
+
+    startButton.classList.add(
+        "hidden"
+    );
+
+
+    const cameraOK =
+        await startCamera();
+
+
+    if (!cameraOK) {
+
+        startButton.classList.remove(
+            "hidden"
+        );
+
+        return;
+
+    }
+
+
+    const mediapipeOK =
+        await initializeMediaPipe();
+
+
+    if (!mediapipeOK) {
+
+        startButton.classList.remove(
+            "hidden"
+        );
+
+        return;
+
+    }
+
+
+    running = true;
+
+
+    lastVideoTime = -1;
+
+    lastDetectionTime = 0;
+
+
+    setStatus(
+        "Détection des mains..."
+    );
+
+
+    requestAnimationFrame(
+        detectionLoop
+    );
+
+}
+
+
+/* =========================================================
+   DETECTION LOOP
+========================================================= */
+
+function detectionLoop(timestamp) {
+
+    if (!running) {
+
+        return;
+
+    }
+
 
     if (
         videoLeft.readyState >= 2 &&
         videoLeft.currentTime !== lastVideoTime
     ) {
 
-        lastVideoTime = videoLeft.currentTime;
+        const elapsed =
+            timestamp - lastDetectionTime;
 
-        const results = detector.detectForVideo(
-            videoLeft,
-            performance.now()
-        );
 
-        drawHands(ctxLeft, results);
+        const minimumFrameTime =
+            1000 / CONFIG.fps;
 
-        drawHands(ctxRight, results);
+
+        if (
+            elapsed >= minimumFrameTime
+        ) {
+
+            lastDetectionTime =
+                timestamp;
+
+
+            lastVideoTime =
+                videoLeft.currentTime;
+
+
+            try {
+
+                const results =
+                    handLandmarker.detectForVideo(
+
+                        videoLeft,
+
+                        timestamp
+
+                    );
+
+
+                drawResults(
+                    ctxLeft,
+                    canvasLeft,
+                    results
+                );
+
+
+                drawResults(
+                    ctxRight,
+                    canvasRight,
+                    results
+                );
+
+
+                updateFPS();
+
+            } catch (error) {
+
+                console.error(
+                    "Detection error:",
+                    error
+                );
+
+            }
+
+        }
+
     }
 
-    requestAnimationFrame(detectHands);
+
+    requestAnimationFrame(
+        detectionLoop
+    );
+
 }
 
 
-function drawHands(ctx, results) {
+/* =========================================================
+   HAND CONNECTIONS
+========================================================= */
+
+const HAND_CONNECTIONS = [
+
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+
+    [0, 5],
+    [5, 6],
+    [6, 7],
+    [7, 8],
+
+    [5, 9],
+    [9, 10],
+    [10, 11],
+    [11, 12],
+
+    [9, 13],
+    [13, 14],
+    [14, 15],
+    [15, 16],
+
+    [13, 17],
+    [17, 18],
+    [18, 19],
+    [19, 20],
+
+    [0, 17]
+
+];
+
+
+/* =========================================================
+   DRAW RESULTS
+========================================================= */
+
+function drawResults(
+    ctx,
+    canvas,
+    results
+) {
 
     ctx.clearRect(
         0,
         0,
-        canvasLeft.width,
-        canvasLeft.height
+        canvas.width,
+        canvas.height
     );
 
-    if (!results.landmarks) {
+
+    if (
+        !results ||
+        !results.landmarks
+    ) {
+
         return;
+
     }
 
-    for (const landmarks of results.landmarks) {
 
-        // Connexions de la main
-        const connections = [
-            [0,1],[1,2],[2,3],[3,4],
-            [0,5],[5,6],[6,7],[7,8],
-            [5,9],[9,10],[10,11],[11,12],
-            [9,13],[13,14],[14,15],[15,16],
-            [13,17],[17,18],[18,19],[19,20],
-            [0,17]
-        ];
+    for (
+        const landmarks
+        of results.landmarks
+    ) {
 
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "red";
+        drawSkeleton(
+            ctx,
+            landmarks
+        );
 
-        for (const [a, b] of connections) {
 
-            ctx.beginPath();
+        drawPoints(
+            ctx,
+            landmarks
+        );
 
-            ctx.moveTo(
-                landmarks[a].x * 320,
-                landmarks[a].y * 240
-            );
-
-            ctx.lineTo(
-                landmarks[b].x * 320,
-                landmarks[b].y * 240
-            );
-
-            ctx.stroke();
-        }
-
-        // 21 points
-        for (const point of landmarks) {
-
-            ctx.beginPath();
-
-            ctx.arc(
-                point.x * 320,
-                point.y * 240,
-                3,
-                0,
-                Math.PI * 2
-            );
-
-            ctx.fillStyle = "lime";
-            ctx.fill();
-        }
     }
+
 }
 
 
-fullscreenButton.onclick = async () => {
+/* =========================================================
+   DRAW SKELETON
+========================================================= */
 
-    try {
+function drawSkeleton(
+    ctx,
+    landmarks
+) {
 
-        if (!document.fullscreenElement) {
+    ctx.beginPath();
 
-            await document.documentElement.requestFullscreen();
 
-        } else {
+    for (
+        const connection
+        of HAND_CONNECTIONS
+    ) {
 
-            await document.exitFullscreen();
+        const start =
+            landmarks[connection[0]];
+
+        const end =
+            landmarks[connection[1]];
+
+
+        if (!start || !end) {
+
+            continue;
 
         }
 
-        if (screen.orientation?.lock) {
 
-            try {
-                await screen.orientation.lock("landscape");
-            } catch (e) {}
-        }
+        ctx.moveTo(
 
-    } catch (error) {
+            start.x *
+                CONFIG.width,
 
-        console.error(error);
+            start.y *
+                CONFIG.height
+
+        );
+
+
+        ctx.lineTo(
+
+            end.x *
+                CONFIG.width,
+
+            end.y *
+                CONFIG.height
+
+        );
 
     }
-};
+
+
+    ctx.lineWidth = 2;
+
+    ctx.strokeStyle =
+        "red";
+
+    ctx.stroke();
+
+}
+
+
+/* =========================================================
+   DRAW 21 POINTS
+========================================================= */
+
+function drawPoints(
+    ctx,
+    landmarks
+) {
+
+    for (
+        const point
+        of landmarks
+    ) {
+
+        const x =
+            point.x *
+            CONFIG.width;
+
+
+        const y =
+            point.y *
+            CONFIG.height;
+
+
+        ctx.beginPath();
+
+
+        ctx.arc(
+
+            x,
+
+            y,
+
+            3,
+
+            0,
+
+            Math.PI * 2
+
+        );
+
+
+        ctx.fillStyle =
+            "lime";
+
+
+        ctx.fill();
+
+    }
+
+}
+
+
+/* =========================================================
+   FPS
+========================================================= */
+
+function updateFPS() {
+
+    frameCounter++;
+
+
+    const now =
+        performance.now();
+
+
+    const elapsed =
+        now - fpsTimer;
+
+
+    if (elapsed >= 1000) {
+
+        currentFPS =
+            frameCounter /
+            (elapsed / 1000);
+
+
+        fpsElement.textContent =
+            "FPS : " +
+            Math.round(
+                currentFPS
+            );
+
+
+        frameCounter = 0;
+
+        fpsTimer = now;
+
+    }
+
+}
+
+
+/* =========================================================
+   FULLSCREEN
+========================================================= */
+
+fullscreenButton.addEventListener(
+    "click",
+    async () => {
+
+        try {
+
+            if (
+                !document.fullscreenElement
+            ) {
+
+                await document
+                    .documentElement
+                    .requestFullscreen();
+
+            } else {
+
+                await document
+                    .exitFullscreen();
+
+            }
+
+        } catch (error) {
+
+            console.error(
+                "Fullscreen error:",
+                error
+            );
+
+        }
+
+
+        try {
+
+            if (
+                screen.orientation &&
+                screen.orientation.lock
+            ) {
+
+                await screen.orientation
+                    .lock("landscape");
+
+            }
+
+        } catch (error) {
+
+            console.log(
+                "Orientation lock non disponible"
+            );
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   START BUTTON
+========================================================= */
+
+startButton.addEventListener(
+    "click",
+    start
+);
+
+
+/* =========================================================
+   PAGE VISIBILITY
+========================================================= */
+
+document.addEventListener(
+    "visibilitychange",
+    () => {
+
+        if (
+            document.hidden
+        ) {
+
+            running = false;
+
+        } else if (
+            handLandmarker &&
+            stream
+        ) {
+
+            running = true;
+
+            lastVideoTime = -1;
+
+            requestAnimationFrame(
+                detectionLoop
+            );
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   CLEANUP
+========================================================= */
+
+window.addEventListener(
+    "beforeunload",
+    () => {
+
+        running = false;
+
+
+        if (stream) {
+
+            for (
+                const track
+                of stream.getTracks()
+            ) {
+
+                track.stop();
+
+            }
+
+        }
+
+
+        if (handLandmarker) {
+
+            handLandmarker.close();
+
+        }
+
+    }
+);
 
 </script>
 
